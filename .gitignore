@@ -1,0 +1,11 @@
+*.csv
+*.zip
+*.png
+*.pth
+.~lock*
+*.txt
+env/*
+*__pycache__/
+hyperparam_results/*
+checkpoints/*
+!requirements.txt
