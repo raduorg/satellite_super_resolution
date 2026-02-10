@@ -4,12 +4,11 @@ import random
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from PIL import Image
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import argparse
 
 from torchmetrics.image import StructuralSimilarityIndexMeasure
@@ -17,11 +16,12 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
 from models.edsr import EDSR
+from utils.dataset import SuperResDataset
 
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 128
-LR_SIZE = 32
+HR_SIZE = 64   # EuroSAT original image size
+LR_SIZE = 16   # Downscaled LR image size
 
 NUM_WORKERS = 4
 
@@ -30,28 +30,6 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(SEED)
-
-class SRDataset(Dataset):
-    def __init__(self, csv_path, root_dir, with_target=True):
-        self.df = pd.read_csv(csv_path)
-        self.root_dir = root_dir
-        self.with_target = with_target
-
-    def __len__(self):
-        return len(self.df)
-
-    def _load_image(self, fname):
-        img = Image.open(os.path.join(self.root_dir, fname)).convert('RGB')
-        arr = np.asarray(img, dtype=np.float32).transpose(2, 0, 1) / 255.0
-        return torch.from_numpy(arr)
-
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        lr = self._load_image(row['input_image'])
-        if self.with_target:
-            hr = self._load_image(row['target_image'])
-            return lr, hr
-        return lr, row['id']
 
 
 def compute_mse(pred, gt):
@@ -207,14 +185,14 @@ def run_grid_search(model_type, epochs_per_config, max_configs=None):
             print(f"  {k}: {v}")
         
         train_loader = DataLoader(
-            SRDataset('train.csv', 'train'),
+            SuperResDataset('train.csv'),
             batch_size=config['batch_size'],
             shuffle=True,
             num_workers=NUM_WORKERS,
             pin_memory=True
         )
         val_loader = DataLoader(
-            SRDataset('validation.csv', 'validation'),
+            SuperResDataset('val.csv'),
             batch_size=config['batch_size'],
             shuffle=False,
             num_workers=NUM_WORKERS,

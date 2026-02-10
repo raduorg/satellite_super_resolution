@@ -3,9 +3,10 @@ from PIL import Image
 import argparse
 
 from infer import load_checkpoint
+from utils.dataset import SuperResDataset
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR = 128
+HR = 64  # EuroSAT original image size
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
@@ -35,9 +36,10 @@ def load_lr(path):
     arr = np.asarray(img, dtype=np.float32).transpose(2,0,1) / 255.0
     return torch.from_numpy(arr).unsqueeze(0)
 
-test_df = pd.read_csv('test_input.csv')
-first_name = test_df.loc[0, 'input_image']
-lr_tensor  = load_lr(os.path.join('test_input', first_name)).to(DEVICE)
+# Load first test image from test.csv
+test_df = pd.read_csv('test.csv')
+first_lr_path = test_df.loc[0, 'lr_path']
+lr_tensor = load_lr(first_lr_path).to(DEVICE)
 
 with torch.no_grad():
     sr = model(lr_tensor).cpu().squeeze(0).numpy()

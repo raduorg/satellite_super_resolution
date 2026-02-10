@@ -1,20 +1,18 @@
 
 import os
-import csv
 import random
 from datetime import datetime
 import shutil
 import numpy as np
-import pandas as pd
-from PIL import Image
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import argparse
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
+from utils.dataset import SuperResDataset
 
 SEED        = 123
 BATCH_SIZE  = 32
@@ -25,8 +23,8 @@ WEIGHT_DECAY = 1e-4
 
 EPOCHS      = 100
 DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE     = 128
-LR_SIZE     = 32
+HR_SIZE     = 64   # EuroSAT original image size
+LR_SIZE     = 16   # Downscaled LR image size
 NUM_WORKERS = 4
 
 random.seed(SEED)
@@ -34,38 +32,15 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-class SRDataset(Dataset):
-    def __init__(self, csv_path, root_dir, with_target=True):
-        self.df = pd.read_csv(csv_path)
-        self.root_dir = root_dir
-        self.with_target = with_target
-
-    def __len__(self):
-        return len(self.df)
-
-    def _load_image(self, fname):
-        img = Image.open(os.path.join(self.root_dir, fname)).convert('RGB')
-        arr = np.asarray(img, dtype=np.float32).transpose(2, 0, 1) / 255.0
-        return torch.from_numpy(arr)
-
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        lr = self._load_image(row['input_image'])
-        if self.with_target:
-            hr = self._load_image(row['target_image'])
-            return lr, hr
-        return lr, row['id']
-
-
 train_loader = DataLoader(
-    SRDataset('train.csv', 'train'),
+    SuperResDataset('train.csv'),
     batch_size=BATCH_SIZE,
     shuffle=True,
     num_workers=NUM_WORKERS,
     pin_memory=True
 )
 val_loader = DataLoader(
-    SRDataset('validation.csv', 'validation'),
+    SuperResDataset('val.csv'),
     batch_size=BATCH_SIZE,
     shuffle=False,
     num_workers=NUM_WORKERS,
@@ -148,39 +123,28 @@ model.load_state_dict(torch.load(f'best_{model_name}.pth', map_location=DEVICE))
 model.eval()
 
 test_loader = DataLoader(
-    SRDataset('test_input.csv', 'test_input', with_target=False),
+    SuperResDataset('test.csv', with_target=False),
     batch_size=1,
     shuffle=False
 )
 
-# Handle existing submission.csv
-submissions_dir = 'submissions'
-if not os.path.exists(submissions_dir):
-    os.makedirs(submissions_dir)
+# Create output directory for SR images
+output_dir = 'output_sr'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
-if os.path.exists('submission.csv'):
-    # Get file modification time
-    file_stat = os.stat('submission.csv')
-    creation_time = datetime.fromtimestamp(file_stat.st_mtime)
-    timestamp = creation_time.strftime('%m%d%H%M')
-    
-    # Move to submissions directory with timestamp
-    old_name = f'submission_{timestamp}.csv'
-    old_path = os.path.join(submissions_dir, old_name)
-    shutil.move('submission.csv', old_path)
-    print(f'Moved existing submission to {old_path}')
+from PIL import Image as PILImage
 
-submission_rows = []
-total_pixels = HR_SIZE * HR_SIZE * 3
+print(f'Running inference on {len(test_loader)} test images...')
 with torch.no_grad():
-    for lr_img, img_id in tqdm(test_loader, desc='Inference'):
+    for lr_img, filename in tqdm(test_loader, desc='Inference'):
         sr = model(lr_img.to(DEVICE)).cpu().squeeze(0).numpy()
         sr_uint8 = (sr * 255.0).round().clip(0, 255).astype(np.uint8)
-        submission_rows.append([img_id.item()] + sr_uint8.flatten().tolist())
+        # Convert CHW to HWC for PIL
+        sr_hwc = sr_uint8.transpose(1, 2, 0)
+        # Save as JPG
+        output_path = os.path.join(output_dir, filename[0].replace('.jpg', '_sr.jpg'))
+        PILImage.fromarray(sr_hwc).save(output_path, 'JPEG', quality=95)
 
-with open('submission.csv', 'w', newline='') as f:
-    writer = csv.writer(f)
-    writer.writerow(['id'] + [f'pixel_{i}' for i in range(total_pixels)])
-    writer.writerows(submission_rows)
-
+print(f'Finished. SR images saved to {output_dir}/')
 print('Finished. Submission file created.')

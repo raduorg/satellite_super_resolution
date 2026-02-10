@@ -3,13 +3,11 @@ import random
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from PIL import Image
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms.functional as TF
+from torch.utils.data import DataLoader
 import argparse
 
 from torchmetrics.image import StructuralSimilarityIndexMeasure
@@ -17,11 +15,12 @@ from torchmetrics.image import StructuralSimilarityIndexMeasure
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
 from models.edsr import EDSR
+from utils.dataset import SuperResDatasetAugmented
 
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 128
-LR_SIZE = 32
+HR_SIZE = 64   # EuroSAT original image size
+LR_SIZE = 16   # Downscaled LR image size
 NUM_WORKERS = 4
 
 random.seed(SEED)
@@ -57,69 +56,6 @@ AUGMENTATION_STRATEGIES = {
     'flip_rotate': {'horizontal_flip': True, 'vertical_flip': True, 'rotate90': True},
     'full_geometric': {'horizontal_flip': True, 'vertical_flip': True, 'rotate90': True, 'color_jitter': True},
 }
-
-COLOR_JITTER_BRIGHTNESS = 0.1
-COLOR_JITTER_CONTRAST = 0.1
-
-class SRDatasetAugmented(Dataset):
-    def __init__(self, csv_path, root_dir, augmentation=None, with_target=True):
-        self.df = pd.read_csv(csv_path)
-        self.root_dir = root_dir
-        self.with_target = with_target
-        self.augmentation = augmentation or {}
-
-    def __len__(self):
-        return len(self.df)
-
-    def _load_image(self, fname):
-        img = Image.open(os.path.join(self.root_dir, fname)).convert('RGB')
-        return img
-
-    def _apply_augmentation(self, lr_img, hr_img):
-        if self.augmentation.get('horizontal_flip', False):
-            if random.random() > 0.5:
-                lr_img = TF.hflip(lr_img)
-                hr_img = TF.hflip(hr_img)
-        
-        if self.augmentation.get('vertical_flip', False):
-            if random.random() > 0.5:
-                lr_img = TF.vflip(lr_img)
-                hr_img = TF.vflip(hr_img)
-        
-        if self.augmentation.get('rotate90', False):
-            k = random.randint(0, 3)  #0, 1, 2, or 3 times 90 degres
-            if k > 0:
-                lr_img = TF.rotate(lr_img, angle=90 * k)
-                hr_img = TF.rotate(hr_img, angle=90 * k)
-        
-        if self.augmentation.get('color_jitter', False):
-            brightness_factor = 1.0 + random.uniform(-COLOR_JITTER_BRIGHTNESS, COLOR_JITTER_BRIGHTNESS)
-            contrast_factor = 1.0 + random.uniform(-COLOR_JITTER_CONTRAST, COLOR_JITTER_CONTRAST)
-            
-            lr_img = TF.adjust_brightness( lr_img, brightness_factor)
-            lr_img = TF.adjust_contrast(lr_img, contrast_factor )
-            hr_img = TF.adjust_brightness(hr_img,brightness_factor)
-            hr_img = TF.adjust_contrast(hr_img, contrast_factor)
-        
-        return lr_img, hr_img
-
-    def _to_tensor(self, img):
-        arr = np.asarray(img, dtype=np.float32).transpose(2,0,1) / 255.0
-        return torch.from_numpy( arr)
-
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        lr_img = self._load_image(row['input_image'])
-        
-        if self.with_target:
-            hr_img = self._load_image(row['target_image'])
-            
-            if self.augmentation:
-                lr_img, hr_img = self._apply_augmentation(lr_img, hr_img)
-            
-            return self._to_tensor(lr_img), self._to_tensor(hr_img)
-        
-        return self._to_tensor(lr_img), row['id']
 
 def compute_mse(pred, gt):
     return F.mse_loss(pred, gt).item()
@@ -236,14 +172,14 @@ def run_augmentation_search(model_type, configs, epochs):
             print(f"\n[{run_count}/{total_runs}] {model_type.upper()} config {config_idx} + '{aug_name}' augmentation")
             
             train_loader = DataLoader(
-                SRDatasetAugmented('train.csv', 'train', augmentation=aug_params),
+                SuperResDatasetAugmented('train.csv', augmentation=aug_params),
                 batch_size=int(config['batch_size']),
                 shuffle=True,
                 num_workers=NUM_WORKERS,
                 pin_memory=True
             )
             val_loader = DataLoader(
-                SRDatasetAugmented('validation.csv', 'validation', augmentation=None),
+                SuperResDatasetAugmented('val.csv', augmentation=None),
                 batch_size=int(config['batch_size']),
                 shuffle=False,
                 num_workers=NUM_WORKERS,

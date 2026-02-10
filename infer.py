@@ -1,5 +1,4 @@
 import os
-import csv
 import json
 from datetime import datetime
 import numpy as np
@@ -8,15 +7,16 @@ from PIL import Image
 from tqdm import tqdm
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import argparse
 
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
 from models.edsr import EDSR
+from utils.dataset import SuperResDataset
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 128
+HR_SIZE = 64  # EuroSAT original image size
 
 
 def geometric_ensemble(model, lr_img, device):
@@ -53,39 +53,6 @@ def psnr(pred, gt):
     if mse == 0:
         return float('inf')
     return 10 * torch.log10(1.0 / mse)
-
-class TestDataset(Dataset):
-    def __init__(self, csv_path, root_dir):
-        self.df = pd.read_csv(csv_path)
-        self.root_dir = root_dir
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        img = Image.open(os.path.join( self.root_dir,row['input_image'])).convert('RGB')
-        arr = np.asarray(img, dtype=np.float32).transpose(2, 0, 1) / 255.0
-        return torch.from_numpy(arr), row['id']
-
-class ValidationDataset(Dataset):
-    def __init__(self, csv_path, root_dir):
-        self.df = pd.read_csv(csv_path)
-        self.root_dir = root_dir
-
-    def __len__(self):
-        return len(self.df)
-
-    def _load_image(self, fname):
-        img = Image.open(os.path.join(self.root_dir, fname)).convert('RGB')
-        arr = np.asarray(img, dtype=np.float32).transpose(2, 0, 1) / 255.0
-        return torch.from_numpy(arr)
-
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        lr = self._load_image(row['input_image'])
-        hr = self._load_image(row['target_image'])
-        return lr, hr, row['id'] if 'id' in row else idx
 
 
 def load_checkpoint(checkpoint_path, device):
@@ -155,8 +122,8 @@ def main():
     parser.add_argument(
         '--output-dir',
         type=str,
-        default='submissions',
-        help='dir to save submission files'
+        default='output_sr',
+        help='dir to save super-resolved images'
     )
     parser.add_argument(
         '--tta',
@@ -197,7 +164,7 @@ def main():
         print("VALIDATION MODE")
         
         val_loader = DataLoader(
-            ValidationDataset('validation.csv', 'validation'),
+            SuperResDataset('val.csv'),
             batch_size=1,
             shuffle=False
         )
@@ -206,7 +173,7 @@ def main():
         psnr_vals = []
         
         with torch.no_grad():
-            for lr_img, hr_img, img_id in tqdm(val_loader, desc='Validation'):
+            for lr_img, hr_img in tqdm(val_loader, desc='Validation'):
                 hr_img = hr_img.to(DEVICE)
                 
                 if args.tta:
@@ -231,18 +198,19 @@ def main():
         return 0
     
     test_loader = DataLoader(
-        TestDataset('test_input.csv', 'test_input'),
+        SuperResDataset('test.csv', with_target=False),
         batch_size=1,
         shuffle=False
     )
     
+    os.makedirs(args.output_dir, exist_ok=True)
+    
     desc = 'Inference (TTA)' if args.tta else 'Inference'
     print(f"\nRunning {'8x TTA ' if args.tta else ''}inference on {len(test_loader)} images...")
-    rows = []
-    total_pixels = HR_SIZE * HR_SIZE * 3
+    print(f"Output directory: {args.output_dir}")
     
     with torch.no_grad():
-        for lr_img, img_id in tqdm(test_loader, desc=desc):
+        for lr_img, filename in tqdm(test_loader, desc=desc):
             if args.tta:
                 sr_tensor = geometric_ensemble(model, lr_img, DEVICE)
                 sr = sr_tensor.cpu().squeeze(0).numpy()
@@ -250,23 +218,15 @@ def main():
                 sr = model(lr_img.to(DEVICE)).cpu().squeeze(0).numpy()
             
             sr_uint8 = (sr * 255.0).round().clip(0, 255).astype(np.uint8)
-            sr_uint8 = sr_uint8.transpose(1, 2, 0)  #don t forget CHW -> HWC for row-major flatten
-            rows.append([img_id.item()] + sr_uint8.flatten().tolist())
+            # Convert CHW to HWC for PIL
+            sr_hwc = sr_uint8.transpose(1, 2, 0)
+            
+            # Save as JPG with _sr suffix
+            output_filename = filename[0].replace('.jpg', '_sr.jpg').replace('.jpeg', '_sr.jpeg')
+            output_path = os.path.join(args.output_dir, output_filename)
+            Image.fromarray(sr_hwc).save(output_path, 'JPEG', quality=95)
     
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    checkpoint_name = os.path.basename(checkpoint_path)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    tta_suffix = '_tta' if args.tta else ''
-    submission_filename = f"submission_{checkpoint_name}{tta_suffix}_{timestamp}.csv"
-    submission_path = os.path.join(args.output_dir, submission_filename)
-    
-    with open(submission_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['id'] + [f'pixel_{i}' for i in range(total_pixels)])
-        writer.writerows(rows)
-    
-    print(f"\nSubmission saved: {submission_path}")
+    print(f"\nSR images saved to: {args.output_dir}/")
     return 0
 
 
