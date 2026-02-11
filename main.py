@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import argparse
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
+from models.mlp_mixer import MLPMixerSR
 from utils.dataset import SuperResDataset
 
 SEED        = 123
@@ -58,7 +59,7 @@ def psnr(pred, gt):
 
 # Parse command line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', choices=['cnn', 'ae'], default='cnn', help='Model to use: cnn or ae')
+parser.add_argument('--model', choices=['cnn', 'ae', 'mlp'], default='cnn', help='Model to use: cnn, ae, or mlp')
 args = parser.parse_args()
 
 # Model selection
@@ -68,6 +69,18 @@ if args.model == 'cnn':
 elif args.model == 'ae':
     model = SRAutoEncoderLite().to(DEVICE)
     model_name = 'ae'
+elif args.model == 'mlp':
+    model = MLPMixerSR(
+        patch_size=4,
+        scale=4,
+        img_size=(LR_SIZE, LR_SIZE),
+        in_chans=3,
+        embed_dim=128,
+        n_layers=6,
+        token_mlp_dim=256,
+        channel_mlp_dim=512
+    ).to(DEVICE)
+    model_name = 'mlp'
 else:
     raise ValueError('Unknown model type')
 

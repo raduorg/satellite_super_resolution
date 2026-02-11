@@ -9,3 +9,4 @@ env/*
 hyperparam_results/*
 checkpoints/*
 !requirements.txt
+EuroSAT*
