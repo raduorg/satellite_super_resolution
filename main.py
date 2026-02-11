@@ -13,6 +13,7 @@ import argparse
 from models.srresnet import SRResNetLite
 from models.ae import SRAutoEncoderLite
 from models.mlp_mixer import MLPMixerSR
+from models.edsr import EDSR
 from utils.dataset import SuperResDataset
 
 SEED        = 123
@@ -59,7 +60,21 @@ def psnr(pred, gt):
 
 # Parse command line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', choices=['cnn', 'ae', 'mlp'], default='cnn', help='Model to use: cnn, ae, or mlp')
+parser.add_argument('--model', choices=['cnn', 'ae', 'mlp', 'edsr'], default='cnn', help='Model to use: cnn, ae, mlp, or edsr')
+
+# MLP Mixer arguments
+parser.add_argument('--mlp_patch_size', type=int, default=4, help='MLP Mixer: patch size')
+parser.add_argument('--mlp_embed_dim', type=int, default=128, help='MLP Mixer: embedding dimension')
+parser.add_argument('--mlp_n_layers', type=int, default=6, help='MLP Mixer: number of mixer layers')
+parser.add_argument('--mlp_token_mlp_dim', type=int, default=256, help='MLP Mixer: token mixing MLP hidden dimension')
+parser.add_argument('--mlp_channel_mlp_dim', type=int, default=512, help='MLP Mixer: channel mixing MLP hidden dimension')
+parser.add_argument('--mlp_p_drop', type=float, default=0.0, help='MLP Mixer: dropout probability')
+
+# EDSR arguments
+parser.add_argument('--edsr_n_feats', type=int, default=64, help='EDSR: number of feature channels')
+parser.add_argument('--edsr_n_resblocks', type=int, default=16, help='EDSR: number of residual blocks')
+parser.add_argument('--edsr_res_scale', type=float, default=1.0, help='EDSR: residual scaling factor')
+
 args = parser.parse_args()
 
 # Model selection
@@ -71,16 +86,25 @@ elif args.model == 'ae':
     model_name = 'ae'
 elif args.model == 'mlp':
     model = MLPMixerSR(
-        patch_size=4,
-        scale=4,
+        patch_size=args.mlp_patch_size,
+        scale=HR_SIZE // LR_SIZE,
         img_size=(LR_SIZE, LR_SIZE),
         in_chans=3,
-        embed_dim=128,
-        n_layers=6,
-        token_mlp_dim=256,
-        channel_mlp_dim=512
+        embed_dim=args.mlp_embed_dim,
+        n_layers=args.mlp_n_layers,
+        token_mlp_dim=args.mlp_token_mlp_dim,
+        channel_mlp_dim=args.mlp_channel_mlp_dim,
+        p_drop=args.mlp_p_drop
     ).to(DEVICE)
     model_name = 'mlp'
+elif args.model == 'edsr':
+    model = EDSR(
+        n_feats=args.edsr_n_feats,
+        n_resblocks=args.edsr_n_resblocks,
+        res_scale=args.edsr_res_scale,
+        scale=HR_SIZE // LR_SIZE
+    ).to(DEVICE)
+    model_name = 'edsr'
 else:
     raise ValueError('Unknown model type')
 
