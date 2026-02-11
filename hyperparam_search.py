@@ -13,10 +13,9 @@ import argparse
 
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 
-from models.srresnet import SRResNetLite
-from models.ae import SRAutoEncoderLite
 from models.edsr import EDSR
-from utils.dataset import SuperResDataset
+from models.mlp_mixer import MLPMixerSR
+from utils.dataset import SRDataset
 
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -100,21 +99,19 @@ def train_model(model, train_loader, val_loader, config, device, max_epochs):
 
 
 def build_model(model_type, config, device):
-    if model_type == 'cnn':
-        model = SRResNetLite(
-            n_feats=config.get( 'n_feats', 64),
-            n_resblocks=config.get('n_resblocks',8),
-            res_scale=config.get('res_scale', 1.0)
-        )
-    elif model_type == 'edsr':
+    if model_type ==  'edsr':
         model = EDSR(
             n_feats=config.get('n_feats',64),
             n_resblocks=config.get('n_resblocks', 16),
             res_scale=config.get('res_scale',1.0)
         )
-    elif model_type == 'ae':
-        model = SRAutoEncoderLite(
-            nf=config.get('nf', 64 )
+    elif model_type == 'mlp':
+        model = MLPMixerSR(
+            patch_size=config.get('patch_size', 4),
+            embed_dim=config.get('embed_dim', 128),
+            n_layers=config.get('n_layers', 6),
+            token_mlp_dim=config.get('token_mlp_dim', 256),
+            channel_mlp_dim=config.get('channel_mlp_dim', 512)
         )
     else:
         raise ValueError(f"Unknown model type: '{model_type}'. Supported models: cnn, edsr, ae")
@@ -122,45 +119,123 @@ def build_model(model_type, config, device):
     return model.to(device)
 
 
-def get_search_space(model_type):
-    common = {
-        'lr': [1e-3, 2e-4, 1e-4,  5e-4],
-        'batch_size': [16, 32,64],
-        'weight_decay': [0, 1e-4 , 1e-3],
-    }
+# def get_search_space(model_type):
+#     common = {
+#         'lr': [1e-3, 2e-4, 1e-4,  5e-4],
+#         'batch_size': [16, 32,64],
+#         'weight_decay': [0, 1e-4 , 1e-3],
+#     }
     
-    if model_type == 'cnn':
-        return {
-            **common,
-            'n_feats': [32, 64, 128],
-            'n_resblocks': [4, 8,12],
-            'res_scale': [0.1,0.5,1.0],
-        }
-    elif model_type == 'edsr':
-        return {
-            **common,
-            'n_feats': [32, 64,128],
-            'n_resblocks': [8, 16,  32],
-            'res_scale': [0.1,0.5, 1.0],
-        }
-    elif model_type == 'ae':
-        return {
-            **common,
-            'nf': [32, 64, 128],
-        }
+#     if model_type == 'edsr':
+#         return {
+#             **common,
+#             'n_feats': [32, 64,128],
+#             'n_resblocks': [8, 16,  32],
+#             'res_scale': [0.1,0.5, 1.0],
+#         }
+#     elif model_type == 'mlp':
+#         return {
+#             **common,
+#             'embed_dim': [128, 256],
+#             'n_layers': [4, 6, 8],
+#             'token_mlp_dim': [256, 512],
+#             'channel_mlp_dim': [512, 1024],
+#         }
+#     else:
+#         raise ValueError(f"Unknown model type: '{model_type}'. Supported models: cnn, edsr, ae")
+def get_search_space(model_type: str):
+    """ Returns a *list* of concrete configs, not a full Cartesian product. Each config is a dict you can feed directly into argparse.Namespace(**cfg). """
+    # ------------------------------------------------------------------
+    # common blocks (coupled lr ↔ batch_size)
+    # ------------------------------------------------------------------
+    small    = dict(lr=2e-4, batch_size=16)   # conservative
+    medium   = dict(lr=5e-4, batch_size=32)   # default
+    large    = dict(lr=1e-3, batch_size=64)   # aggressive
+    wd = [0, 1e-4]                            # sensible choices
+
+    if model_type == 'edsr':
+        # capacity tiers ------------------------------------------------
+        tiny   = dict(n_feats=32,  n_resblocks=8)
+        base   = dict(n_feats=64,  n_resblocks=16)
+        big    = dict(n_feats=128, n_resblocks=32)
+
+        res_scale_vals = [0.1, 1.0]           # only 2 useful values
+
+        # glue everything together -------------------------------------
+        configs = []
+        for wd_val in wd:
+            for cap, opt in [ (tiny,  small),
+                              (base,  medium),
+                              (big,   large) ]:
+                for rs in res_scale_vals:
+                    cfg = dict(weight_decay=wd_val,
+                               res_scale=rs,
+                               **cap,      # n_feats, n_resblocks
+                               **opt)      # lr, batch_size
+                    configs.append(cfg)
+        return configs
+
+    elif model_type == 'mlp':
+            # ------------------------------------------------------------------
+            # capacity tiers
+            # ------------------------------------------------------------------
+            tiny  = dict(embed_dim=128, n_layers=4,
+                        token_mlp_dim=256,  channel_mlp_dim=512)
+            base  = dict(embed_dim=128, n_layers=6,
+                        token_mlp_dim=256,  channel_mlp_dim=512)
+            big   = dict(embed_dim=256, n_layers=8,
+                        token_mlp_dim=512,  channel_mlp_dim=1024)
+
+            capacity_blocks = [
+                (tiny,  small),      # tiny tier + conservative optimiser
+                (base,  medium),     # base tier + medium optimiser
+                (big,   large),      # big tier + aggressive optimiser
+            ]
+
+            configs = []
+
+            # ═══════════════════════════════════════════════════════════════
+            # 1) OLD CONFIGS (already trained) → kept for reference only
+            # The append() lines are commented out, so nothing is added.
+            # ═══════════════════════════════════════════════════════════════
+            # for wd_val in wd:
+            # for cap, opt in capacity_blocks:
+            # old_cfg = dict(weight_decay=wd_val,
+            # patch_size=4,
+            # p_drop=0.0,
+            # **cap,
+            # **opt)
+            # # configs.append(old_cfg) # ← disabled on purpose
+
+            # ═══════════════════════════════════════════════════════════════
+            # 2) NEW CONFIGS that we still want to run
+            # ═══════════════════════════════════════════════════════════════
+            for wd_val in wd:                                 # 2 × weight-decay
+                for cap, opt in capacity_blocks:              # 3 × tiers
+                    # ---- main variant: patch_size = 2, p_drop = 0 ----------
+                    cfg = dict(weight_decay=wd_val,
+                            patch_size=2,
+                            p_drop=0.0,
+                            **cap,
+                            **opt)
+                    configs.append(cfg)
+
+                    # ---- extra variety: only for the "big" tier -----------
+                    if cap is big:
+                        extra_cfg = dict(weight_decay=wd_val,
+                                        patch_size=4 if wd_val else 2,
+                                        p_drop=0.1,
+                                        **cap,
+                                        **opt)
+                        configs.append(extra_cfg)
+
+            return configs
     else:
-        raise ValueError(f"Unknown model type: '{model_type}'. Supported models: cnn, edsr, ae")
-
-
-def generate_configs(search_space):
-    keys = list(search_space.keys())
-    values = list(search_space.values())
-    return [dict(zip(keys, v)) for v in itertools.product(*values)]
+        raise ValueError('model_type must be "edsr" or "mlp"')
 
 
 def run_grid_search(model_type, epochs_per_config, max_configs=None):
-    search_space = get_search_space(model_type)
-    all_configs = generate_configs(search_space)
+    all_configs = get_search_space(model_type)
     total_configs = len(all_configs)
     
     if max_configs and len(all_configs) > max_configs:
@@ -168,11 +243,14 @@ def run_grid_search(model_type, epochs_per_config, max_configs=None):
     
     print(f"Hyperparameter Search: {model_type}")
     print(f"Search space:")
-    for key, values in search_space.items():
-        print(f"  {key}: {values}")
+    # Print a sample of the search space structure
+    if all_configs:
+        sample_config = all_configs[0]
+        for key, values in sample_config.items():
+            print(f"  {key}: {values}")
     print(f"Total possible configurations: {total_configs}")
     if max_configs and max_configs < total_configs:
-        print(f"Running subset: {len(all_configs)} configs (rzndomly sampled)")
+        print(f"Running subset: {len(all_configs)} configs (randomly sampled)")
     else:
         print(f"Running all {len(all_configs)} configurations")
     print(f"Epochs per config: {epochs_per_config}")
@@ -185,14 +263,14 @@ def run_grid_search(model_type, epochs_per_config, max_configs=None):
             print(f"  {k}: {v}")
         
         train_loader = DataLoader(
-            SuperResDataset('train.csv'),
+            SRDataset('train.csv'),
             batch_size=config['batch_size'],
             shuffle=True,
             num_workers=NUM_WORKERS,
             pin_memory=True
         )
         val_loader = DataLoader(
-            SuperResDataset('val.csv'),
+            SRDataset('validation.csv'),
             batch_size=config['batch_size'],
             shuffle=False,
             num_workers=NUM_WORKERS,
@@ -257,7 +335,7 @@ def main():
     )
     parser.add_argument(
         '--model', 
-        choices=['cnn', 'ae', 'edsr', 'all'], 
+        choices=['mlp', 'edsr', 'all'], 
         default='all',
     )
     parser.add_argument(

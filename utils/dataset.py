@@ -41,13 +41,15 @@ class SRDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def _load_image(self, fname):
-        """Load image and convert to normalized CHW tensor."""
+    def _load_image(self, fname, resize=None):
+        """Load image, optionally resize, and convert to normalized CHW tensor."""
         if self.root_dir:
             path = os.path.join(self.root_dir, fname)
         else:
             path = fname
         img = Image.open(path).convert('RGB')
+        if resize is not None:
+            img = img.resize(resize, Image.BICUBIC)
         arr = np.asarray(img, dtype=np.float32).transpose(2, 0, 1) / 255.0
         return torch.from_numpy(arr)
 
@@ -76,9 +78,10 @@ class SRDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        lr = self._load_image(row['lr_path'])
+        # Always resize LR and HR to expected sizes
+        lr = self._load_image(row['lr_path'], resize=(16, 16))
         if self.with_target:
-            hr = self._load_image(row['hr_path'])
+            hr = self._load_image(row['hr_path'], resize=(64, 64))
             if self.augmentation:
                 lr, hr = self._apply_augmentation(lr, hr)
             return lr, hr

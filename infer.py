@@ -164,7 +164,7 @@ def main():
         print("VALIDATION MODE")
         
         val_loader = DataLoader(
-            SuperResDataset('val.csv'),
+            SuperResDataset('validation.csv'),
             batch_size=1,
             shuffle=False
         )

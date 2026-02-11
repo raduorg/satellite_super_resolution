@@ -179,7 +179,7 @@ def run_augmentation_search(model_type, configs, epochs):
                 pin_memory=True
             )
             val_loader = DataLoader(
-                SuperResDatasetAugmented('val.csv', augmentation=None),
+                SuperResDatasetAugmented('validation.csv', augmentation=None),
                 batch_size=int(config['batch_size']),
                 shuffle=False,
                 num_workers=NUM_WORKERS,

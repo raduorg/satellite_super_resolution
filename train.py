@@ -30,8 +30,8 @@ from utils.dataset import SRDataset
 # ─────────────────────────────────────────────────────────────
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 128
-LR_SIZE = 32
+HR_SIZE = 64
+LR_SIZE = 16
 NUM_WORKERS = 4
 MIN_LR = 1e-6
 
@@ -263,14 +263,14 @@ if __name__ == '__main__':
     # Data loaders
     augmentation = AUGMENTATION_STRATEGIES[args.augmentation]
     train_loader = DataLoader(
-        SRDataset('train.csv', 'train', augmentation=augmentation),
+        SRDataset('train.csv', root_dir=None, augmentation=augmentation),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=NUM_WORKERS,
         pin_memory=True
     )
     val_loader = DataLoader(
-        SRDataset('validation.csv', 'validation'),  # No augmentation for validation
+        SRDataset('validation.csv', root_dir=None),  # No augmentation for validation
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=NUM_WORKERS,
@@ -342,6 +342,7 @@ if __name__ == '__main__':
             hr_img = hr_img.to(DEVICE)
             optimizer.zero_grad()
             sr = model(lr_img)
+            #print(f"lr_img.shape: {lr_img.shape}, sr.shape: {sr.shape}, hr_img.shape: {hr_img.shape}")
             loss = criterion(sr, hr_img)
             loss.backward()
             optimizer.step()

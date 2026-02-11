@@ -70,13 +70,17 @@ class MixerLayer(nn.Module):
 # ------------------------------------------------------------------
 class MLPMixerSR(nn.Module):
     """ Super-Resolution network based purely on MLP-Mixer idea. 1. Split LR image in non-overlapping patches 2. Run a stack of Mixer layers (token+channel mixing) 3. Reshape tokens back to feature map 4. Learned up-sampling (Conv -> PixelShuffle -> Conv) 5. Output HR RGB image ----------------------------------------------------------------- Parameters ---------- scale : integer up-scaling factor (2,3,4…) img_size : tuple(h,w) of the LOW-RES input size (needed so that token-mixing MLPs have fixed size) patch_size : size of square patches (e.g. 4 or 8) in_chans : usually 3 embed_dim : hidden dimension of each token n_layers : how many Mixer layers token_mlp_dim : hidden dim of token-mixing MLP channel_mlp_dim: hidden dim of channel-mixing MLP """
-    def __init__(self, patch_size: int = 4, scale: int = 4, img_size: tuple = (48, 48), in_chans: int = 3, embed_dim: int = 256, n_layers: int = 8, token_mlp_dim: int = 512, channel_mlp_dim: int = 1024, p_drop: float = 0.):
+    def __init__(self, patch_size: int = 4, scale: int = 4, img_size: tuple = (16, 16), in_chans: int = 3, embed_dim: int = 256, n_layers: int = 8, token_mlp_dim: int = 512, channel_mlp_dim: int = 1024, p_drop: float = 0.):
         super().__init__()
         ih, iw = img_size
         assert ih % patch_size == 0 and iw % patch_size == 0, "img_size must be divisible by patch_size"
         self.h_p = ih // patch_size
         self.w_p = iw // patch_size
         num_tokens = self.h_p * self.w_p
+
+        self.patch_size = patch_size
+        self.scale = scale
+        self.final_up = patch_size * scale  # total enlargement
 
         # 1. patch embedding
         self.patch_embed = PatchEmbed(in_chans, embed_dim, patch_size)
@@ -88,8 +92,8 @@ class MLPMixerSR(nn.Module):
 
         # 3. learned up-sampler (Conv -> PixelShuffle)
         self.upsampler = nn.Sequential(
-            nn.Conv2d(embed_dim, embed_dim * (scale ** 2), kernel_size=3, padding=1),
-            nn.PixelShuffle(scale),
+            nn.Conv2d(embed_dim, embed_dim * (self.final_up ** 2), kernel_size=3, padding=1),
+            nn.PixelShuffle(self.final_up),
             nn.Conv2d(embed_dim, in_chans, kernel_size=3, padding=1)
         )
 
@@ -129,12 +133,12 @@ class MLPMixerSR(nn.Module):
 if __name__ == '__main__':
     """ Example : take a 48x48 LR image, upscale x4 → 192x192 """
     model = MLPMixerSR(scale=4,
-                       img_size=(48, 48),   # low-res size
+                       img_size=(16, 16),   # low-res size
                        patch_size=4,
                        embed_dim=256,
                        n_layers=6)
 
-    lr = torch.randn(1, 3, 48, 48)   # B,C,H,W
+    lr = torch.randn(1, 3, 16, 16)   # B,C,H,W
     sr = model(lr)
     print('LR shape:', lr.shape)
     print('SR shape:', sr.shape)

@@ -1,5 +1,5 @@
 """Utility modules for satellite super resolution."""
 
-from .dataset import SuperResDataset, SuperResDatasetAugmented
+from .dataset import SRDataset
 
-__all__ = ['SuperResDataset', 'SuperResDatasetAugmented']
+__all__ = ['SRDataset']
