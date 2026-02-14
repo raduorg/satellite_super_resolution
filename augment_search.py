@@ -12,10 +12,9 @@ import argparse
 
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 
-from models.srresnet import SRResNetLite
-from models.ae import SRAutoEncoderLite
+from models.mlp_mixer import MLPMixerSR
 from models.edsr import EDSR
-from utils.dataset import SuperResDatasetAugmented
+from utils.dataset import SRDataset
 
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -30,22 +29,46 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(SEED)
 
 BEST_CONFIGS = {
-    'cnn': [
-        {'lr': 1e-3,'batch_size': 16, 'weight_decay': 1e-3,'n_feats': 128, 'n_resblocks': 8, 'res_scale': 0.1},
-        {'lr': 1e-3, 'batch_size': 16, 'weight_decay': 0.0, 'n_feats': 128, 'n_resblocks': 8, 'res_scale': 0.1},
-        {'lr': 1e-3,'batch_size': 32, 'weight_decay': 1e-4, 'n_feats': 128, 'n_resblocks': 8, 'res_scale': 0.1},
-        {'lr': 1e-3, 'batch_size': 16, 'weight_decay': 1e-4, 'n_feats': 64,  'n_resblocks': 8, 'res_scale': 0.1},
-        {'lr': 1e-3, 'batch_size': 16,'weight_decay': 0.0,  'n_feats': 64,  'n_resblocks': 8, 'res_scale': 0.1},
-    ],
-    'ae': [
-        {'lr': 1e-3, 'batch_size': 16, 'weight_decay': 1e-4, 'nf': 64},
-        {'lr': 1e-3, 'batch_size': 32, 'weight_decay': 0.0,  'nf': 128},
-        {'lr': 1e-3, 'batch_size': 32, 'weight_decay': 1e-3, 'nf': 128},
+
+    'mlp': [
+            {
+                'lr': 0.001,
+                'batch_size': 64,
+                'weight_decay': 0,
+                'patch_size': 2,
+                'scale': 2,
+                'embed_dim': 256,
+                'n_layers': 8,
+                'token_mlp_dim': 512,
+                'channel_mlp_dim': 1024
+            },
+            {
+                'lr': 0.0005,
+                'batch_size': 32,
+                'weight_decay': 0,
+                'patch_size': 2,
+                'scale': 2,
+                'embed_dim': 128,
+                'n_layers': 6,
+                'token_mlp_dim': 256,
+                'channel_mlp_dim': 512
+            },
+            {
+                'lr': 0.0002,
+                'batch_size': 16,
+                'weight_decay': 0.0001,
+                'patch_size': 2,
+                'scale': 2,
+                'embed_dim': 128,
+                'n_layers': 4,
+                'token_mlp_dim': 256,
+                'channel_mlp_dim': 512
+            },
     ],
     'edsr': [
-        {'lr': 1e-4,'batch_size': 16, 'weight_decay': 0.0, 'n_feats': 64, 'n_resblocks': 16, 'res_scale': 0.1},
-        {'lr': 1e-4, 'batch_size': 16, 'weight_decay': 0.0,'n_feats': 128, 'n_resblocks': 16,'res_scale': 0.1},
-        {'lr': 1e-4, 'batch_size': 32,'weight_decay': 1e-4, 'n_feats': 64,'n_resblocks': 16, 'res_scale': 0.1},
+        {'lr': 5e-4,'batch_size': 32, 'weight_decay': 0.0, 'n_feats': 64, 'n_resblocks': 24, 'res_scale': 0.1},
+        {'lr': 5e-4, 'batch_size': 32, 'weight_decay': 0.0,'n_feats': 96, 'n_resblocks': 24,'res_scale': 0.05},
+        {'lr': 5e-4, 'batch_size': 32,'weight_decay': 1e-4, 'n_feats': 96,'n_resblocks': 24, 'res_scale': 0.1},
     ],
 }
 
@@ -126,24 +149,23 @@ def train_model(model, train_loader, val_loader, config, device, max_epochs):
 
 
 def build_model(model_type, config, device):
-    if model_type == 'cnn':
-        model = SRResNetLite(
-            n_feats=config.get('n_feats', 64),
-            n_resblocks=config.get('n_resblocks', 8),
-            res_scale=config.get('res_scale', 1.0)
-        )
+    if model_type == 'mlp':
+            model = MLPMixerSR(
+                patch_size=config.get('patch_size', 2),
+                embed_dim=config.get('embed_dim', 128),
+                n_layers=config.get('n_layers', 6),
+                token_mlp_dim=config.get('token_mlp_dim', 256),
+                channel_mlp_dim=config.get('channel_mlp_dim', 512),
+                p_drop=0.0
+            )
     elif model_type == 'edsr':
         model = EDSR(
             n_feats=config.get('n_feats', 64),
             n_resblocks=config.get('n_resblocks', 16),
             res_scale=config.get('res_scale', 1.0)
         )
-    elif model_type == 'ae':
-        model = SRAutoEncoderLite(
-            nf=config.get('nf', 64)
-        )
     else:
-        raise ValueError(f"Unknown model type: '{model_type}'. Supported models: cnn, edsr, ae")
+        raise ValueError(f"Unknown model type: '{model_type}'. Supported models: mlp, edsr")
     
     return model.to(device)
 
@@ -172,14 +194,14 @@ def run_augmentation_search(model_type, configs, epochs):
             print(f"\n[{run_count}/{total_runs}] {model_type.upper()} config {config_idx} + '{aug_name}' augmentation")
             
             train_loader = DataLoader(
-                SuperResDatasetAugmented('train.csv', augmentation=aug_params),
+                SRDataset('train.csv', augmentation=aug_params),
                 batch_size=int(config['batch_size']),
                 shuffle=True,
                 num_workers=NUM_WORKERS,
                 pin_memory=True
             )
             val_loader = DataLoader(
-                SuperResDatasetAugmented('validation.csv', augmentation=None),
+                SRDataset('validation.csv', augmentation=None),
                 batch_size=int(config['batch_size']),
                 shuffle=False,
                 num_workers=NUM_WORKERS,
@@ -220,7 +242,7 @@ def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
-    parser.add_argument('--model', choices=['cnn', 'ae', 'edsr', 'all'],default='all')
+    parser.add_argument('--model', choices=['mlp',  'edsr', 'all'],default='all')
     parser.add_argument('--epochs',type=int,default=20)
     parser.add_argument('--output-dir', type=str, default='augment_results')    
     args = parser.parse_args()

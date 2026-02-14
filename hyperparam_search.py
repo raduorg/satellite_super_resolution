@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import argparse
 
-from torchmetrics.image import StructuralSimilarityIndexMeasure
+
 
 from models.edsr import EDSR
 from models.mlp_mixer import MLPMixerSR
@@ -42,25 +42,39 @@ def compute_psnr(pred, gt):
     return (10 * torch.log10(1.0 / mse)).item()
 
 
-def evaluate_model(model, val_loader, device):
     model.eval()
-    
-    ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
-    
+    def ssim_torch(img1, img2, C1=0.01**2, C2=0.03**2):
+        # img1, img2: (N, C, H, W) or (C, H, W), range [0,1]
+        if img1.dim() == 4:
+            mu1 = img1.mean(dim=[2,3], keepdim=True)
+            mu2 = img2.mean(dim=[2,3], keepdim=True)
+            sigma1_sq = ((img1 - mu1) ** 2).mean(dim=[2,3], keepdim=True)
+            sigma2_sq = ((img2 - mu2) ** 2).mean(dim=[2,3], keepdim=True)
+            sigma12 = ((img1 - mu1) * (img2 - mu2)).mean(dim=[2,3], keepdim=True)
+            ssim_map = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                       ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+            return ssim_map.mean().item()
+        else:
+            mu1 = img1.mean(dim=[1,2], keepdim=True)
+            mu2 = img2.mean(dim=[1,2], keepdim=True)
+            sigma1_sq = ((img1 - mu1) ** 2).mean(dim=[1,2], keepdim=True)
+            sigma2_sq = ((img2 - mu2) ** 2).mean(dim=[1,2], keepdim=True)
+            sigma12 = ((img1 - mu1) * (img2 - mu2)).mean(dim=[1,2], keepdim=True)
+            ssim_map = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+                       ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+            return ssim_map.mean().item()
+
     mse_vals = []
     psnr_vals = []
     ssim_vals = []
-    
     with torch.no_grad():
         for lr_img, hr_img in val_loader:
             lr_img = lr_img.to(device)
             hr_img = hr_img.to(device)
             sr = model(lr_img)
-            
             mse_vals.append(compute_mse(sr, hr_img))
             psnr_vals.append(compute_psnr(sr, hr_img))
-            ssim_vals.append(ssim_metric(sr, hr_img).item())
-    
+            ssim_vals.append(ssim_torch(sr, hr_img))
     return {
         'mse': np.mean(mse_vals),
         'psnr': np.mean(psnr_vals),
@@ -148,25 +162,28 @@ def get_search_space(model_type: str):
     # ------------------------------------------------------------------
     # common blocks (coupled lr ↔ batch_size)
     # ------------------------------------------------------------------
-    small    = dict(lr=2e-4, batch_size=16)   # conservative
+    #small    = dict(lr=2e-4, batch_size=16)   # conservative
     medium   = dict(lr=5e-4, batch_size=32)   # default
-    large    = dict(lr=1e-3, batch_size=64)   # aggressive
+    #large    = dict(lr=1e-3, batch_size=64)   # aggressive
     wd = [0, 1e-4]                            # sensible choices
 
     if model_type == 'edsr':
         # capacity tiers ------------------------------------------------
-        tiny   = dict(n_feats=32,  n_resblocks=8)
-        base   = dict(n_feats=64,  n_resblocks=16)
-        big    = dict(n_feats=128, n_resblocks=32)
-
-        res_scale_vals = [0.1, 1.0]           # only 2 useful values
+        tiny = dict(n_feats=32, n_resblocks=8) # ← legacy (commented)
+        base = dict(n_feats=64, n_resblocks=16) # ← legacy (commented)
+        deep  = dict(n_feats=64,  n_resblocks=24)     # NEW: deeper, same width
+        mid   = dict(n_feats=96,  n_resblocks=24)     # NEW: mid width
+        big = dict(n_feats=128, n_resblocks=32) # ← legacy (commented)        ]     
+        res_scale_vals = [0.1, 0.05, 0.2]           # only 2 useful values
+        capacity_blocks = [
+            (deep, medium),
+            (mid,  medium),
+        ]
 
         # glue everything together -------------------------------------
         configs = []
         for wd_val in wd:
-            for cap, opt in [ (tiny,  small),
-                              (base,  medium),
-                              (big,   large) ]:
+            for cap, opt in capacity_blocks:
                 for rs in res_scale_vals:
                     cfg = dict(weight_decay=wd_val,
                                res_scale=rs,
@@ -187,9 +204,9 @@ def get_search_space(model_type: str):
                         token_mlp_dim=512,  channel_mlp_dim=1024)
 
             capacity_blocks = [
-                (tiny,  small),      # tiny tier + conservative optimiser
-                (base,  medium),     # base tier + medium optimiser
-                (big,   large),      # big tier + aggressive optimiser
+                (deep,  medium),      # tiny tier + conservative optimiser
+                (mid,  medium),     # base tier + medium optimiser
+                # (big,   large),      # big tier + aggressive optimiser
             ]
 
             configs = []
