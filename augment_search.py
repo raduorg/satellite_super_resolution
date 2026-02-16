@@ -18,8 +18,8 @@ from utils.dataset import SRDataset
 
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 64   # EuroSAT original image size
-LR_SIZE = 16   # Downscaled LR image size
+HR_SIZE = 64
+LR_SIZE = 16
 NUM_WORKERS = 4
 
 random.seed(SEED)
@@ -239,8 +239,7 @@ def save_results(results, filename):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser()
     
     parser.add_argument('--model', choices=['mlp',  'edsr', 'all'],default='all')
     parser.add_argument('--epochs',type=int,default=20)

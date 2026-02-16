@@ -12,6 +12,7 @@ class ResBlock(nn.Module):
 
         self.body = nn.Sequential(*m)
         self.res_scale = res_scale
+
     def forward(self, x):
         res = self.body(x).mul(self.res_scale)
         res += x
@@ -22,15 +23,11 @@ class EDSR(nn.Module):
         super(EDSR, self).__init__()
         
         kernel_size = 3 
-        #head
         self.head = nn.Conv2d(3, n_feats, kernel_size, padding=kernel_size//2)
-        #body
         self.body = nn.Sequential(*[
             ResBlock(n_feats, kernel_size, res_scale=res_scale) for _ in range(n_resblocks)
         ])
-        #conv after blocks
         self.body_tail = nn.Conv2d(n_feats, n_feats, kernel_size, padding=kernel_size//2)
-        #upsampler
         self.upsampler = nn.Sequential(
             nn.Conv2d(n_feats, n_feats * (scale ** 2), kernel_size, padding=kernel_size//2),
             nn.PixelShuffle(scale),

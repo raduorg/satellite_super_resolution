@@ -1,14 +1,3 @@
-"""
-Training Script for Super-Resolution Models
-============================================
-Train EDSR or MLPMixerSR with specified hyperparameters.
-Saves checkpoint with config JSON for reproducibility.
-
-Usage:
-    python train.py --model edsr --epochs 100 --n-feats 64 --n-resblocks 16 --augmentation flip_rotate
-    python train.py --model mlp --epochs 100 --mlp-embed-dim 256 --mlp-n-layers 8
-"""
-
 import os
 import json
 import random
@@ -25,9 +14,6 @@ from models.edsr import EDSR
 from models.mlp_mixer import MLPMixerSR
 from utils.dataset import SRDataset
 
-# ─────────────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────────────
 SEED = 123
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 HR_SIZE = 64
@@ -42,9 +28,6 @@ torch.manual_seed(SEED)
 def charbonnier(pred, target, eps=1e-3):
     return torch.mean(torch.sqrt((pred - target) ** 2 + eps ** 2))
 
-# ─────────────────────────────────────────────────────────────
-# Augmentation Strategies
-# ─────────────────────────────────────────────────────────────
 AUGMENTATION_STRATEGIES = {
     'none': {},
     'flip_h': {'horizontal_flip': True},
@@ -53,20 +36,12 @@ AUGMENTATION_STRATEGIES = {
     'full_geometric': {'horizontal_flip': True, 'vertical_flip': True, 'rotate90': True, 'color_jitter': True},
 }
 
-
-# ─────────────────────────────────────────────────────────────
-# Metrics
-# ─────────────────────────────────────────────────────────────
 def psnr(pred, gt):
     mse = F.mse_loss(pred, gt)
     return 10 * torch.log10(1.0 / mse)
 
 
-# ─────────────────────────────────────────────────────────────
-# Checkpoint Functions
-# ─────────────────────────────────────────────────────────────
 def get_checkpoint_name(model_type, config):
-    """Generate descriptive checkpoint name"""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     if model_type == 'edsr':
@@ -98,14 +73,11 @@ def get_checkpoint_name(model_type, config):
 
 
 def save_checkpoint(model, model_type, config, checkpoint_dir, name, best_psnr, best_epoch):
-    """Save model checkpoint and config JSON"""
     os.makedirs(checkpoint_dir, exist_ok=True)
     
-    # Save model weights
     pth_path = os.path.join(checkpoint_dir, f"{name}.pth")
     torch.save(model.state_dict(), pth_path)
     
-    # Build architecture config
     if model_type == 'edsr':
         architecture = {
             'n_feats': config['n_feats'],
@@ -124,7 +96,6 @@ def save_checkpoint(model, model_type, config, checkpoint_dir, name, best_psnr, 
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    # Save config JSON
     meta = {
         'model_type': model_type,
         'architecture': architecture,
@@ -152,60 +123,40 @@ def save_checkpoint(model, model_type, config, checkpoint_dir, name, best_psnr, 
     return pth_path
 
 
-# ─────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Train Super-Resolution models',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+    parser = argparse.ArgumentParser()
     
-    # Model selection
-    parser.add_argument('--model', choices=['edsr', 'mlp'], required=True,
-                        help='Model type: edsr (EDSR) or mlp (MLPMixerSR)')
+    parser.add_argument('--model', choices=['edsr', 'mlp'], required=True)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--lr', type=float, default=2e-4)
+    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--weight-decay', type=float, default=1e-4)
+    parser.add_argument('--loss', choices=['l1', 'charbonnier'], default='l1')
+    parser.add_argument('--augmentation', choices=list(AUGMENTATION_STRATEGIES.keys()), default='none')
     
-    # Training hyperparameters
-    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
-    parser.add_argument('--weight-decay', type=float, default=1e-4, help='Weight decay')
-    parser.add_argument('--loss', choices=['l1', 'charbonnier'], default='l1', help='Loss function to use')
+    # edsr
+    parser.add_argument('--n-feats', type=int, default=64)
+    parser.add_argument('--n-resblocks', type=int, default=8)
+    parser.add_argument('--res-scale', type=float, default=1.0)
     
-    # Augmentation
-    parser.add_argument('--augmentation', choices=list(AUGMENTATION_STRATEGIES.keys()),
-                        default='none', help='Augmentation strategy')
+    #mlp mixer
+    parser.add_argument('--mlp-patch-size', type=int, default=4)
+    parser.add_argument('--mlp-embed-dim', type=int, default=128)
+    parser.add_argument('--mlp-n-layers', type=int, default=6)
+    parser.add_argument('--mlp-token-mlp-dim', type=int, default=256)
+    parser.add_argument('--mlp-channel-mlp-dim', type=int, default=512)
+    parser.add_argument('--mlp-p-drop', type=float, default=0.0)
     
-    # EDSR-specific
-    parser.add_argument('--n-feats', type=int, default=64, help='[EDSR] Number of features')
-    parser.add_argument('--n-resblocks', type=int, default=8, help='[EDSR] Number of residual blocks')
-    parser.add_argument('--res-scale', type=float, default=1.0, help='[EDSR] Residual scaling factor')
+    # finetuning
+    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--ft-epochs', type=int, default=20)
+    parser.add_argument('--lr-ft', type=float, default=5e-4)
+    parser.add_argument('--reset-optim', action='store_true')
     
-    # MLP Mixer-specific
-    parser.add_argument('--mlp-patch-size', type=int, default=4, help='[MLP] Patch size for tokenization')
-    parser.add_argument('--mlp-embed-dim', type=int, default=128, help='[MLP] Embedding dimension per token')
-    parser.add_argument('--mlp-n-layers', type=int, default=6, help='[MLP] Number of Mixer layers')
-    parser.add_argument('--mlp-token-mlp-dim', type=int, default=256, help='[MLP] Token-mixing MLP hidden dimension')
-    parser.add_argument('--mlp-channel-mlp-dim', type=int, default=512, help='[MLP] Channel-mixing MLP hidden dimension')
-    parser.add_argument('--mlp-p-drop', type=float, default=0.0, help='[MLP] Dropout probability')
-    
-    # Fine tuning
-    parser.add_argument('--resume', type=str, default=None,
-                        help='Path to .pth checkpoint to continue from')
-    parser.add_argument('--ft-epochs', type=int, default=20,
-                        help='Extra epochs when --resume is used')
-    parser.add_argument('--lr-ft', type=float, default=5e-4,
-                        help='New LR for fine-tuning phase')
-    parser.add_argument('--reset-optim', action='store_true',
-                        help='Start a fresh optimiser even when resuming')
-    
-    # Output
-    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
-                        help='Directory to save checkpoints')
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints')
     
     args = parser.parse_args()
     
-    # Build config dict
     config = {
         'lr': args.lr,
         'batch_size': args.batch_size,
@@ -215,7 +166,6 @@ if __name__ == '__main__':
         'loss_function': args.loss
     }
     
-    # Calculate scale factor
     scale = HR_SIZE // LR_SIZE
     
     if args.model == 'edsr':
@@ -260,7 +210,6 @@ if __name__ == '__main__':
     print(f"Device: {DEVICE}")
     print(f"{'='*60}\n")
     
-    # Data loaders
     augmentation = AUGMENTATION_STRATEGIES[args.augmentation]
     train_loader = DataLoader(
         SRDataset('train.csv', root_dir=None, augmentation=augmentation),
@@ -270,55 +219,36 @@ if __name__ == '__main__':
         pin_memory=True
     )
     val_loader = DataLoader(
-        SRDataset('validation.csv', root_dir=None),  # No augmentation for validation
+        SRDataset('validation.csv', root_dir=None),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=NUM_WORKERS,
         pin_memory=True
     )
     
-    # ------------------------------------------------------------
-    # 1. Load checkpoint (weights only) if requested
-    # ------------------------------------------------------------
     resume = args.resume is not None
     want_reset = args.reset_optim
     if resume:
         ckpt = torch.load(args.resume, map_location=DEVICE)
         model.load_state_dict(ckpt['model'] if 'model' in ckpt else ckpt)
 
-    # ------------------------------------------------------------
-    # 2. Decide starting LR and epoch budget
-    # ------------------------------------------------------------
     lr_start = args.lr_ft if (resume and args.lr_ft is not None) else args.lr
     if resume and args.ft_epochs:
         args.epochs = args.ft_epochs
 
-    # ------------------------------------------------------------
-    # 3. Create optimiser fresh
-    # ------------------------------------------------------------
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=lr_start,
                                   betas=(0.9, 0.99),
                                   weight_decay=args.weight_decay)
 
-    # ------------------------------------------------------------
-    # 4. Optionally load old optimiser state and keep moments
-    # ------------------------------------------------------------
     if resume and not want_reset and 'optimizer' in ckpt:
         optimizer.load_state_dict(ckpt['optimizer'])
-        # after loading, override LR in case lr_ft differs
         for g in optimizer.param_groups:
             g['lr'] = lr_start
 
-    # ------------------------------------------------------------
-    # 5. Update config dict so the banner and JSON are correct
-    # ------------------------------------------------------------
     config['lr']     = lr_start
     config['epochs'] = args.epochs
 
-    # ------------------------------------------------------------
-    # 6. Scheduler now that optimiser is final
-    # ------------------------------------------------------------
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=args.epochs,
@@ -331,7 +261,6 @@ if __name__ == '__main__':
 
     checkpoint_name = get_checkpoint_name(args.model, config)
     
-    # Training loop
     best_psnr = 0.0
     best_epoch = 0
     for epoch in range(1, args.epochs + 1):
@@ -342,7 +271,6 @@ if __name__ == '__main__':
             hr_img = hr_img.to(DEVICE)
             optimizer.zero_grad()
             sr = model(lr_img)
-            #print(f"lr_img.shape: {lr_img.shape}, sr.shape: {sr.shape}, hr_img.shape: {hr_img.shape}")
             loss = criterion(sr, hr_img)
             loss.backward()
             optimizer.step()
@@ -365,7 +293,6 @@ if __name__ == '__main__':
             best_psnr = val_psnr
             best_epoch = epoch
 
-    # Save checkpoint at end of training
     checkpoint_path = save_checkpoint(
         model, args.model, config, args.checkpoint_dir, checkpoint_name, best_psnr, best_epoch
     )

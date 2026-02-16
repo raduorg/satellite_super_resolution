@@ -13,10 +13,11 @@ from models.bicubic import BicubicSR
 from utils.dataset import SRDataset
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-HR_SIZE = 64  # EuroSAT original image size
+HR_SIZE = 64
 
 
 def geometric_ensemble(model, lr_img, device):
+    """8x TTA: rotations + flips"""
     x = lr_img.to(device)
     x_aug = []
     
@@ -93,41 +94,12 @@ def load_checkpoint(checkpoint_path, device):
 def main():
     import warnings
     warnings.filterwarnings("ignore")
-    parser = argparse.ArgumentParser(
-        description='Run inference with a trained SR model',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        '--checkpoint', 
-        type=str, 
-        default=None,
-        help='Checkpoint name; both .pth and _config.json must exist (not needed for bicubic)'
-    )
-    parser.add_argument(
-        '--checkpoint-dir',
-        type=str,
-        default='checkpoints',
-        help='if --checkpoint is just a name'
-    )
-    parser.add_argument(
-        '--model',
-        type=str,
-        required=True,
-        choices=['edsr', 'mlp', 'bicubic'],
-        help='Model type to use for inference'
-    )
-    parser.add_argument(
-        '--tta',
-        action='store_true',
-        help='enable 8x geometric self-ensemble'
-    )
-    parser.add_argument(
-        '--set',
-        type=str,
-        required=True,
-        choices=['test', 'val'],
-        help='Dataset to run inference on: "test" or "val"'
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--checkpoint', type=str, default=None)
+    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints')
+    parser.add_argument('--model', type=str, required=True, choices=['edsr', 'mlp', 'bicubic'])
+    parser.add_argument('--tta', action='store_true')
+    parser.add_argument('--set', type=str, required=True, choices=['test', 'val'])
     args = parser.parse_args()
 
     if args.model == 'bicubic':
@@ -137,7 +109,7 @@ def main():
             'architecture': {'scale': 4},
             'training': 'N/A (no training)'
         }
-    else: #learned models need checkpoint
+    else:
         if args.checkpoint is None:
             print(f"Error: --checkpoint is required for model '{args.model}'")
             return 1
@@ -163,25 +135,19 @@ def main():
     if args.tta:
         print("TTA: Enabled (8x geometric ensemble)")
 
-    # Initialize SSIM metric
     ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(DEVICE)
 
     def compute_metrics(sr, gt):
-        # sr, gt: torch tensors, shape (1, C, H, W) or (C, H, W), range [0,1]
         if sr.dim() == 3:
             sr = sr.unsqueeze(0)
         if gt.dim() == 3:
             gt = gt.unsqueeze(0)
-        # PSNR
         mse = torch.mean((sr - gt) ** 2).item()
         psnr_val = 10 * np.log10(1.0 / mse) if mse > 0 else float('inf')
-        # MSE
         mse_val = mse
-        # SSIM using torchmetrics
         ssim_val = ssim_metric(sr, gt).item()
         return psnr_val, ssim_val, mse_val
 
-    # Determine dataset file based on --set argument
     csv_file = 'validation.csv' if args.set == 'val' else 'test.csv'
     set_name = 'VALIDATION' if args.set == 'val' else 'TEST'
     

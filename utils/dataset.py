@@ -1,7 +1,3 @@
-"""
-Dataset module for Super-Resolution training and inference.
-"""
-
 import os
 import random
 import numpy as np
@@ -12,27 +8,7 @@ from torch.utils.data import Dataset
 
 
 class SRDataset(Dataset):
-    """
-    Dataset for super resolution that reads LR/HR image pairs from CSV.
-    
-    CSV format:
-        lr_path,hr_path,class (class is optional)
-    
-    Supports data augmentation applied consistently to both LR and HR images.
-    """
-    
     def __init__(self, csv_path, root_dir=None, with_target=True, augmentation=None):
-        """
-        Args:
-            csv_path: Path to CSV file with columns 'lr_path', 'hr_path'
-            root_dir: Root directory to prepend to paths. If None, paths are used as-is.
-            with_target: If True, return (lr, hr) tuple. If False, return (lr, filename).
-            augmentation: Dict with augmentation options:
-                - horizontal_flip: bool
-                - vertical_flip: bool
-                - rotate90: bool
-                - color_jitter: bool
-        """
         self.df = pd.read_csv(csv_path)
         self.root_dir = root_dir
         self.with_target = with_target
@@ -42,7 +18,6 @@ class SRDataset(Dataset):
         return len(self.df)
 
     def _load_image(self, fname, resize=None):
-        """Load image, optionally resize, and convert to normalized CHW tensor."""
         if self.root_dir:
             path = os.path.join(self.root_dir, fname)
         else:
@@ -54,7 +29,6 @@ class SRDataset(Dataset):
         return torch.from_numpy(arr)
 
     def _apply_augmentation(self, lr, hr):
-        """Apply same augmentation to both LR and HR tensors."""
         if self.augmentation.get('horizontal_flip') and random.random() > 0.5:
             lr = torch.flip(lr, dims=[2])
             hr = torch.flip(hr, dims=[2])
@@ -78,7 +52,6 @@ class SRDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        # Always resize LR and HR to expected sizes
         lr = self._load_image(row['lr_path'], resize=(16, 16))
         if self.with_target:
             hr = self._load_image(row['hr_path'], resize=(64, 64))
