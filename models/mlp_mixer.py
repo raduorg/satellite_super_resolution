@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-
+#models.mlp
 
 class PatchEmbed(nn.Module):
     def __init__(self, in_chans: int, embed_dim: int, patch_size: int):
@@ -61,7 +61,7 @@ class MLPMixerSR(nn.Module):
     def __init__(self, patch_size: int = 4, scale: int = 4, img_size: tuple = (16, 16), in_chans: int = 3, embed_dim: int = 256, n_layers: int = 8, token_mlp_dim: int = 512, channel_mlp_dim: int = 1024, p_drop: float = 0.):
         super().__init__()
         ih, iw = img_size
-        assert ih % patch_size == 0 and iw % patch_size == 0, "img_size must be divisible by patch_size"
+        assert ih % patch_size == 0 and iw % patch_size == 0, "imgSize must be divisible by patch_size"
         self.h_p = ih // patch_size
         self.w_p = iw // patch_size
         num_tokens = self.h_p * self.w_p

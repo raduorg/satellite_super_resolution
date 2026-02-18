@@ -203,9 +203,7 @@ if __name__ == '__main__':
     else:
         raise ValueError(f"Unknown model type: '{args.model}'. Supported models: edsr, mlp")
     
-    print(f"{'='*60}")
     print(f"Training {args.model.upper()}")
-    print(f"{'='*60}")
     print(f"Config: {config}")
     print(f"Device: {DEVICE}")
     print(f"{'='*60}\n")
@@ -297,7 +295,7 @@ if __name__ == '__main__':
         model, args.model, config, args.checkpoint_dir, checkpoint_name, best_psnr, best_epoch
     )
     
-    print(f"\n{'='*60}")
+    print(f"\n")
     print("Training complete!")
     print(f"Best PSNR: {best_psnr:.2f} dB")
     print(f"Checkpoint: {checkpoint_path}")

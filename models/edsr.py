@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-
+#models.edsr
 class ResBlock(nn.Module):
     def __init__(self, n_feats, kernel_size, bias=True, act=nn.ReLU(True), res_scale=1):
         super(ResBlock, self).__init__()

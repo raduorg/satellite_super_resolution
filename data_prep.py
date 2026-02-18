@@ -117,9 +117,9 @@ def prepare_dataset(eurosat_dir, output_lr_dir, output_csv_dir, classes=None, se
     
     print()
     print(f"Dataset splits:")
-    print(f"  Train: {len(train_data)} images")
+    print(f" Train: {len(train_data)} images")
     print(f"  Val:   {len(val_data)} images")
-    print(f"  Test:  {len(test_data)} images")
+    print(f" Test:  {len(test_data)} images")
     
     def write_csv(data, path):
         import csv
@@ -137,7 +137,6 @@ def prepare_dataset(eurosat_dir, output_lr_dir, output_csv_dir, classes=None, se
     write_csv(val_data, output_csv_dir / 'val.csv')
     write_csv(test_data, output_csv_dir / 'test.csv')
     
-    print()
     print(f"CSV files written:")
     print(f"  {output_csv_dir / 'train.csv'}")
     print(f"  {output_csv_dir / 'val.csv'}")

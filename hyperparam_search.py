@@ -126,7 +126,7 @@ def build_model(model_type, config, device):
             channel_mlp_dim=config.get('channel_mlp_dim', 512)
         )
     else:
-        raise ValueError(f"Unknown model type: '{model_type}'. Supported models: cnn, edsr, ae")
+        raise ValueError(f"Unknown model type: '{model_type}'. Supported models: mlp, edsr")
     
     return model.to(device)
 
